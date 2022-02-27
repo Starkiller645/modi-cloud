@@ -54,7 +54,7 @@ pub mod routes {
 
         let mut login_file = OpenOptions::new().write(true).append(false).open("logins.txt").expect("Couldn't open login file");
         for line in &new_tokens_vector {
-            login_file.write(line.as_bytes()).expect("Couldn't write to login file");
+            login_file.write(&format!("{}\n", line).as_bytes()).expect("Couldn't write to login file");
         }
     
         if username == "" {
@@ -180,7 +180,7 @@ pub mod routes {
                     .open("logins.txt")
                     .unwrap();
                 let id: &String = &format!("{}@{}:{}", &username, time_now, &final_auth_code);
-                writeln!(file, "{}", id.to_string()).expect("Could not write to file");
+                write!(file, "{}\n", id.to_string()).expect("Could not write to file");
 
 
                 log(&format!("Auth code {} registered for user {}", &final_auth_code, username).to_string(), Endpoints::Login);
@@ -240,15 +240,24 @@ pub mod routes {
     pub async fn upload_pkg(pkg_name: String, user: String, token: String, form: FormData) -> Result<impl warp::Reply, warp::Rejection> {
         log(&format!("Receiving new package upload '{}'", pkg_name), Endpoints::Upload);
 
-
-
         let parts: Vec<Part> = form.try_collect().await.map_err(|e| {
             log(&format!("Form error: {}", e), Endpoints::Upload);
             warp::reject::reject();
         }).expect("Failed");
 
         if !check_auth(&user, token) {
+            log("Authentication failed, rejecting...", Endpoints::Upload);
             warp::reject::reject();
+		    let status = 401;
+		    let res = Res{response: status, message: "Invalid authentication token"};
+			let res_data = match serde_json::to_string(&res) {
+                Err(_)       => panic!("Error while encoding JSON object to String"),
+                Ok(res_data) => res_data
+            };
+
+            return Ok(Response::builder()
+               .status(status)
+               .body(res_data))
         }
         
         let package_registry = read_to_string("registry.json").expect("Couldn't find registry file...");
@@ -305,12 +314,13 @@ pub mod routes {
 
         Ok(Response::builder()
            .status(200)
-           .body("")
+           .body("".to_string())
         )
     }
 
     pub async fn get_pkg(pkg_name: String) -> Result<impl warp::Reply, Infallible> {
         let mut byte_array = Vec::<u8>::new();
+
 
         let package_registry = read_to_string("registry.json").expect("Couldn't find registry file...");
         let json_registry: Vec<Package> = serde_json::from_str(&package_registry).expect("Invalid JSON in registry file");
@@ -324,10 +334,9 @@ pub mod routes {
             }
         }
 
-        let mut pkg_file = File::open(pkg_struct.file).expect("Couldn't read package file");
-        pkg_file.read_to_end(&mut byte_array).expect("Couldn't read file");
-
         if have_pkg {
+			let mut pkg_file = File::open(pkg_struct.file).expect("Couldn't read package file");
+			pkg_file.read_to_end(&mut byte_array).expect("Couldn't read file");
             Ok(Response::builder()
                 .status(200)
                 .header("X-Modi-Package-Name", pkg_struct.name)
